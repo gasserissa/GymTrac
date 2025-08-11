@@ -1,0 +1,284 @@
+import SwiftUI
+
+// MARK: - Helpers
+extension View {
+    /// Dismisses the keyboard from anywhere in SwiftUI
+    func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                        to: nil, from: nil, for: nil)
+    }
+}
+
+// MARK: - Model
+struct Session: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var date: Date
+    var note: String
+}
+
+// MARK: - ContentView
+struct ContentView: View {
+    @State private var sessions: [Session] = []
+    @State private var note: String = ""
+    @State private var editing: Session? = nil
+    @State private var showResetAlert = false // For reset confirmation
+
+    var body: some View {
+        NavigationStack {
+            // Background ZStack so taps anywhere dismiss the keyboard
+            ZStack {
+                Color(white: 0.08) // dark background
+                    .ignoresSafeArea()
+                    .onTapGesture { hideKeyboard() }
+
+                VStack(spacing: 14) {
+                    // Title
+                    Text("Sessions Tracker")
+                        .font(.largeTitle).bold()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 8)
+                        .padding(.horizontal)
+
+                    // History (edit + delete)
+                    HistoryList(
+                        sessions: $sessions,
+                        onDeleteOffsets: deleteSessionOffsets,
+                        onEdit: { s in editing = s },
+                        onDeleteSingle: deleteSingle
+                    )
+                }
+            }
+            .navigationBarHidden(false) // Show nav bar so we can add button
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showResetAlert = true
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .foregroundColor(.red)
+                    }
+                }
+            }
+            .alert("Reset All History?", isPresented: $showResetAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Reset", role: .destructive) {
+                    sessions.removeAll()
+                    saveSessions()
+                }
+            } message: {
+                Text("This will permanently delete all logged sessions.")
+            }
+            .onAppear(perform: loadSessions)
+
+            // Summary
+            SummaryCard(totalMissions: sessions.count)
+
+            // Notes (optional)
+            TextField("Notes (optional)", text: $note, axis: .vertical)
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 14).fill(Color(white: 0.15)))
+                .padding(.horizontal)
+                .submitLabel(.done)
+                .onSubmit {
+                    addSession()
+                    hideKeyboard()
+                }
+
+            // Bottom red button—automatically sits above the keyboard
+            .safeAreaInset(edge: .bottom) {
+                Button(action: {
+                    addSession()
+                    hideKeyboard()
+                }) {
+                    Text("+")
+                        .font(.title).bold()
+                        .foregroundStyle(.white)
+                        .frame(width: 80, height: 80)
+                        .background(Circle().fill(Color.red))
+                        .shadow(radius: 4)
+                }
+                .padding(.bottom, 8)
+            }
+
+            // Edit sheet
+            .sheet(item: $editing) { s in
+                EditSessionSheet(session: s) { updated in
+                    if let idx = sessions.firstIndex(where: { $0.id == updated.id }) {
+                        sessions[idx] = updated
+                        saveSessions()
+                    }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .tint(.red)
+    }
+
+    // MARK: - Actions
+    func addSession() {
+        let new = Session(date: Date(), note: note.trimmingCharacters(in: .whitespacesAndNewlines))
+        sessions.insert(new, at: 0)
+        note = ""
+        saveSessions()
+    }
+
+    func deleteSessionOffsets(_ offsets: IndexSet) {
+        sessions.remove(atOffsets: offsets)
+        saveSessions()
+    }
+
+    func deleteSingle(_ session: Session) {
+        if let idx = sessions.firstIndex(of: session) {
+            sessions.remove(at: idx)
+            saveSessions()
+        }
+    }
+
+    // MARK: - Persistence
+    func saveSessions() {
+        if let data = try? JSONEncoder().encode(sessions) {
+            UserDefaults.standard.set(data, forKey: "sessions")
+        }
+    }
+
+    func loadSessions() {
+        if let data = UserDefaults.standard.data(forKey: "sessions"),
+           let arr = try? JSONDecoder().decode([Session].self, from: data) {
+            sessions = arr
+        }
+    }
+}
+
+// MARK: - Summary Card
+struct SummaryCard: View {
+    let totalMissions: Int
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Summary").font(.headline)
+            HStack {
+                StatTile(title: "Total Sessions", value: totalMissions)
+                Spacer()
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity)
+        .background(Color(white: 0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .padding(.horizontal)
+    }
+}
+
+struct StatTile: View {
+    let title: String
+    let value: Int
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text(title).font(.caption).opacity(0.85)
+            Text("\(value)").font(.title2).bold()
+        }
+    }
+}
+
+// MARK: - History List
+struct HistoryList: View {
+    @Binding var sessions: [Session]
+    var onDeleteOffsets: (IndexSet) -> Void
+    var onEdit: (Session) -> Void
+    var onDeleteSingle: (Session) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("History").font(.headline).padding(.horizontal)
+
+            if sessions.isEmpty {
+                Text("No sessions yet. Tap “Log Session”.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+            } else {
+                List {
+                    ForEach(sessions) { s in
+                        HStack(alignment: .center, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(s.date.formatted(date: .abbreviated, time: .shortened)).bold()
+                                if !s.note.isEmpty {
+                                    Text(s.note).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer(minLength: 8)
+                            // Icon-only actions
+                            HStack(spacing: 12) {
+                                Button { onEdit(s) } label: {
+                                    Image(systemName: "pencil")
+                                        .foregroundColor(.blue)
+                                }
+                                .buttonStyle(.bordered)
+
+                                Button(role: .destructive) { onDeleteSingle(s) } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .listRowBackground(Color(white: 0.12))
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button { onEdit(s) } label: { Image(systemName: "pencil") }.tint(.blue)
+                            Button(role: .destructive) { onDeleteSingle(s) } label: { Image(systemName: "trash") }
+                        }
+                        .onTapGesture { onEdit(s) }
+                    }
+                    .onDelete(perform: onDeleteOffsets)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .frame(maxHeight: 360)
+                .background(Color.clear)
+            }
+        }
+    }
+}
+
+// MARK: - Edit Sheet
+struct EditSessionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    var session: Session
+    var onSave: (Session) -> Void
+
+    @State private var date: Date
+    @State private var note: String
+
+    init(session: Session, onSave: @escaping (Session) -> Void) {
+        self.session = session
+        self.onSave = onSave
+        _date = State(initialValue: session.date)
+        _note = State(initialValue: session.note)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                DatePicker("Date & time", selection: $date)
+                TextField("Notes (optional)", text: $note, axis: .vertical)
+            }
+            .navigationTitle("Edit session")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave(Session(id: session.id, date: date, note: note))
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Preview
+#Preview {
+    ContentView()
+        .preferredColorScheme(.dark)
+}
+
