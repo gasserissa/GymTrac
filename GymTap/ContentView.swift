@@ -16,16 +16,28 @@ struct Session: Identifiable, Codable, Equatable {
     var note: String
 }
 
+// MARK: - Undo stack
+fileprivate struct RemovedItem: Equatable {
+    let session: Session
+    let index: Int
+}
+fileprivate enum UndoOp: Equatable {
+    case added(Session)                      // undo = remove that session
+    case deleted([RemovedItem])              // undo = reinsert items at original indices
+    case edited(before: Session, index: Int) // undo = restore old session at index
+}
+
 // MARK: - ContentView
 struct ContentView: View {
-    @AppStorage("appTitle") private var appTitle: String = "Sessions Tracker" // Editable title
+    @AppStorage("appTitle") private var appTitle: String = "Sessions Tracker"
     @State private var sessions: [Session] = []
     @State private var note: String = ""
     @State private var editing: Session? = nil
     @State private var showResetAlert = false
     @State private var showTitleEdit = false
-    @State private var lastActionSession: Session? = nil
-    @State private var lastActionWasAdd = false
+
+    // Undo stack
+    @State private var undoStack: [UndoOp] = []
 
     var body: some View {
         NavigationStack {
@@ -35,17 +47,21 @@ struct ContentView: View {
                     .onTapGesture { hideKeyboard() }
 
                 VStack(spacing: 14) {
-                    // Title
-                    HStack {
+                    // Title row with Reset next to title (swapped positions)
+                    HStack(spacing: 10) {
                         Text(appTitle)
                             .font(.largeTitle).bold()
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.top, 8)
+
+                        // Reset now sits by the title (left side area)
                         Button {
-                            showTitleEdit = true
+                            showResetAlert = true
                         } label: {
-                            Image(systemName: "pencil")
+                            Image(systemName: "arrow.counterclockwise")
+                                .foregroundColor(.red)
                         }
+                        .accessibilityLabel("Reset All History")
                     }
                     .padding(.horizontal)
 
@@ -62,7 +78,7 @@ struct ContentView: View {
 
                     Spacer()
 
-                    // Notes field
+                    // Notes (optional) above the buttons
                     TextField("Notes (optional)", text: $note, axis: .vertical)
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 14).fill(Color(white: 0.15)))
@@ -73,42 +89,24 @@ struct ContentView: View {
                             hideKeyboard()
                         }
                 }
-
-                // Undo button (bottom left)
-                VStack {
-                    Spacer()
-                    HStack {
-                        if lastActionSession != nil {
-                            Button {
-                                undoLastAction()
-                            } label: {
-                                Image(systemName: "arrow.uturn.backward")
-                                    .foregroundColor(.white)
-                                    .frame(width: 50, height: 50)
-                                    .background(Circle().fill(Color.blue))
-                            }
-                            .padding(.leading, 20)
-                        }
-                        Spacer()
-                    }
-                    .padding(.bottom, 80) // Above the + button
-                }
             }
             .navigationBarHidden(false)
+            // Settings icon in the top-right (was pencil; now gearshape) to edit title
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        showResetAlert = true
+                        showTitleEdit = true
                     } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                            .foregroundColor(.red)
+                        Image(systemName: "gearshape")
                     }
+                    .accessibilityLabel("Settings")
                 }
             }
             .alert("Reset All History?", isPresented: $showResetAlert) {
                 Button("Cancel", role: .cancel) { }
                 Button("Reset", role: .destructive) {
                     sessions.removeAll()
+                    undoStack.removeAll()
                     saveSessions()
                 }
             } message: {
@@ -119,26 +117,43 @@ struct ContentView: View {
             }
             .onAppear(perform: loadSessions)
 
-            // + Button
+            // Bottom controls: Undo bottom-left (icon only), + centered
             .safeAreaInset(edge: .bottom) {
-                Button(action: {
-                    addSession()
-                    hideKeyboard()
-                }) {
-                    Text("+")
-                        .font(.title).bold()
-                        .foregroundStyle(.white)
-                        .frame(width: 80, height: 80)
-                        .background(Circle().fill(Color.red))
-                        .shadow(radius: 4)
+                ZStack {
+                    // Undo bottom-left
+                    HStack {
+                        Button(action: { undoLastAction() }) {
+                            Image(systemName: "arrow.uturn.backward")
+                                .font(.title2)
+                                .foregroundColor(.white)
+                        }
+                        .padding(.leading, 20)
+                        .accessibilityLabel("Undo")
+                        Spacer()
+                    }
+
+                    // + centered
+                    Button(action: {
+                        addSession()
+                        hideKeyboard()
+                    }) {
+                        Text("+")
+                            .font(.title).bold()
+                            .foregroundStyle(.white)
+                            .frame(width: 80, height: 80)
+                            .background(Circle().fill(Color.red))
+                            .shadow(radius: 4)
+                    }
+                    .accessibilityLabel("Log Session")
                 }
                 .padding(.bottom, 8)
             }
 
-            // Edit sheet
+            // Edit sheet (returns updated + original for undo)
             .sheet(item: $editing) { s in
-                EditSessionSheet(session: s) { updated in
-                    if let idx = sessions.firstIndex(where: { $0.id == updated.id }) {
+                EditSessionSheet(session: s) { updated, original in
+                    if let idx = sessions.firstIndex(where: { $0.id == original.id }) {
+                        undoStack.append(.edited(before: original, index: idx))
                         sessions[idx] = updated
                         saveSessions()
                     }
@@ -153,40 +168,49 @@ struct ContentView: View {
     func addSession() {
         let new = Session(date: Date(), note: note.trimmingCharacters(in: .whitespacesAndNewlines))
         sessions.insert(new, at: 0)
-        lastActionSession = new
-        lastActionWasAdd = true
+        undoStack.append(.added(new))
         note = ""
         saveSessions()
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 
     func deleteSessionOffsets(_ offsets: IndexSet) {
-        if let first = offsets.first {
-            lastActionSession = sessions[first]
-            lastActionWasAdd = false
+        let removed: [RemovedItem] = offsets.sorted().map { idx in
+            RemovedItem(session: sessions[idx], index: idx)
         }
+        undoStack.append(.deleted(removed))
         sessions.remove(atOffsets: offsets)
         saveSessions()
     }
 
     func deleteSingle(_ session: Session) {
         if let idx = sessions.firstIndex(of: session) {
-            lastActionSession = sessions[idx]
-            lastActionWasAdd = false
+            undoStack.append(.deleted([RemovedItem(session: session, index: idx)]))
             sessions.remove(at: idx)
             saveSessions()
         }
     }
 
     func undoLastAction() {
-        guard let last = lastActionSession else { return }
-        if lastActionWasAdd {
-            sessions.removeAll { $0.id == last.id }
-        } else {
-            sessions.insert(last, at: 0)
+        guard let op = undoStack.popLast() else { return }
+        switch op {
+        case .added(let s):
+            sessions.removeAll { $0.id == s.id }
+        case .deleted(let items):
+            for item in items.sorted(by: { $0.index < $1.index }) {
+                let i = min(item.index, sessions.count)
+                sessions.insert(item.session, at: i)
+            }
+        case .edited(let before, let index):
+            if let currentIdx = sessions.firstIndex(where: { $0.id == before.id }) {
+                sessions[currentIdx] = before
+            } else {
+                let i = min(index, sessions.count)
+                sessions.insert(before, at: i)
+            }
         }
-        lastActionSession = nil
         saveSessions()
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     // MARK: - Persistence (with iCloud sync)
@@ -211,9 +235,8 @@ struct ContentView: View {
 struct SummaryCard: View {
     let sessions: [Session]
     var body: some View {
-        let today = Calendar.current.startOfDay(for: Date())
-        let todayCount = sessions.filter { Calendar.current.isDate($0.date, inSameDayAs: today) }.count
-        let weekCount = sessions.filter { Calendar.current.isDate($0.date, equalTo: Date(), toGranularity: .weekOfYear) }.count
+        let todayCount = sessions.filter { Calendar.current.isDate($0.date, inSameDayAs: Date()) }.count
+        let weekCount  = sessions.filter { Calendar.current.isDate($0.date, equalTo: Date(), toGranularity: .weekOfYear) }.count
         let monthCount = sessions.filter { Calendar.current.isDate($0.date, equalTo: Date(), toGranularity: .month) }.count
 
         return VStack(alignment: .leading, spacing: 10) {
@@ -305,16 +328,16 @@ struct HistoryList: View {
     }
 }
 
-// MARK: - Edit Session Sheet
+// MARK: - Edit Session Sheet (returns updated + original for undo)
 struct EditSessionSheet: View {
     @Environment(\.dismiss) private var dismiss
     var session: Session
-    var onSave: (Session) -> Void
+    var onSave: (Session, Session) -> Void
 
     @State private var date: Date
     @State private var note: String
 
-    init(session: Session, onSave: @escaping (Session) -> Void) {
+    init(session: Session, onSave: @escaping (Session, Session) -> Void) {
         self.session = session
         self.onSave = onSave
         _date = State(initialValue: session.date)
@@ -331,7 +354,8 @@ struct EditSessionSheet: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        onSave(Session(id: session.id, date: date, note: note))
+                        let updated = Session(id: session.id, date: date, note: note)
+                        onSave(updated, session)
                         dismiss()
                     }
                 }
@@ -371,4 +395,4 @@ struct EditTitleSheet: View {
     ContentView()
         .preferredColorScheme(.dark)
 }
-
+//v1.2
