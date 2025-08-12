@@ -18,37 +18,83 @@ struct Session: Identifiable, Codable, Equatable {
 
 // MARK: - ContentView
 struct ContentView: View {
+    @AppStorage("appTitle") private var appTitle: String = "Sessions Tracker" // Editable title
     @State private var sessions: [Session] = []
     @State private var note: String = ""
     @State private var editing: Session? = nil
-    @State private var showResetAlert = false // For reset confirmation
+    @State private var showResetAlert = false
+    @State private var showTitleEdit = false
+    @State private var lastActionSession: Session? = nil
+    @State private var lastActionWasAdd = false
 
     var body: some View {
         NavigationStack {
-            // Background ZStack so taps anywhere dismiss the keyboard
             ZStack {
-                Color(white: 0.08) // dark background
+                Color(white: 0.08)
                     .ignoresSafeArea()
                     .onTapGesture { hideKeyboard() }
 
                 VStack(spacing: 14) {
                     // Title
-                    Text("Sessions Tracker")
-                        .font(.largeTitle).bold()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 8)
-                        .padding(.horizontal)
+                    HStack {
+                        Text(appTitle)
+                            .font(.largeTitle).bold()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 8)
+                        Button {
+                            showTitleEdit = true
+                        } label: {
+                            Image(systemName: "pencil")
+                        }
+                    }
+                    .padding(.horizontal)
 
-                    // History (edit + delete)
+                    // Summary
+                    SummaryCard(sessions: sessions)
+
+                    // History
                     HistoryList(
                         sessions: $sessions,
                         onDeleteOffsets: deleteSessionOffsets,
                         onEdit: { s in editing = s },
                         onDeleteSingle: deleteSingle
                     )
+
+                    Spacer()
+
+                    // Notes field
+                    TextField("Notes (optional)", text: $note, axis: .vertical)
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 14).fill(Color(white: 0.15)))
+                        .padding(.horizontal)
+                        .submitLabel(.done)
+                        .onSubmit {
+                            addSession()
+                            hideKeyboard()
+                        }
+                }
+
+                // Undo button (bottom left)
+                VStack {
+                    Spacer()
+                    HStack {
+                        if lastActionSession != nil {
+                            Button {
+                                undoLastAction()
+                            } label: {
+                                Image(systemName: "arrow.uturn.backward")
+                                    .foregroundColor(.white)
+                                    .frame(width: 50, height: 50)
+                                    .background(Circle().fill(Color.blue))
+                            }
+                            .padding(.leading, 20)
+                        }
+                        Spacer()
+                    }
+                    .padding(.bottom, 80) // Above the + button
                 }
             }
-            .navigationBarHidden(false) // Show nav bar so we can add button
+            .navigationBarHidden(false)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -68,23 +114,12 @@ struct ContentView: View {
             } message: {
                 Text("This will permanently delete all logged sessions.")
             }
+            .sheet(isPresented: $showTitleEdit) {
+                EditTitleSheet(title: $appTitle)
+            }
             .onAppear(perform: loadSessions)
 
-            // Summary
-            SummaryCard(totalMissions: sessions.count)
-
-            // Notes (optional)
-            TextField("Notes (optional)", text: $note, axis: .vertical)
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 14).fill(Color(white: 0.15)))
-                .padding(.horizontal)
-                .submitLabel(.done)
-                .onSubmit {
-                    addSession()
-                    hideKeyboard()
-                }
-
-            // Bottom red button—automatically sits above the keyboard
+            // + Button
             .safeAreaInset(edge: .bottom) {
                 Button(action: {
                     addSession()
@@ -118,46 +153,79 @@ struct ContentView: View {
     func addSession() {
         let new = Session(date: Date(), note: note.trimmingCharacters(in: .whitespacesAndNewlines))
         sessions.insert(new, at: 0)
+        lastActionSession = new
+        lastActionWasAdd = true
         note = ""
         saveSessions()
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 
     func deleteSessionOffsets(_ offsets: IndexSet) {
+        if let first = offsets.first {
+            lastActionSession = sessions[first]
+            lastActionWasAdd = false
+        }
         sessions.remove(atOffsets: offsets)
         saveSessions()
     }
 
     func deleteSingle(_ session: Session) {
         if let idx = sessions.firstIndex(of: session) {
+            lastActionSession = sessions[idx]
+            lastActionWasAdd = false
             sessions.remove(at: idx)
             saveSessions()
         }
     }
 
-    // MARK: - Persistence
+    func undoLastAction() {
+        guard let last = lastActionSession else { return }
+        if lastActionWasAdd {
+            sessions.removeAll { $0.id == last.id }
+        } else {
+            sessions.insert(last, at: 0)
+        }
+        lastActionSession = nil
+        saveSessions()
+    }
+
+    // MARK: - Persistence (with iCloud sync)
     func saveSessions() {
         if let data = try? JSONEncoder().encode(sessions) {
             UserDefaults.standard.set(data, forKey: "sessions")
+            NSUbiquitousKeyValueStore.default.set(data, forKey: "sessions")
+            NSUbiquitousKeyValueStore.default.synchronize()
         }
     }
 
     func loadSessions() {
-        if let data = UserDefaults.standard.data(forKey: "sessions"),
+        if let data = NSUbiquitousKeyValueStore.default.data(forKey: "sessions") ??
+            UserDefaults.standard.data(forKey: "sessions"),
            let arr = try? JSONDecoder().decode([Session].self, from: data) {
             sessions = arr
         }
     }
 }
 
-// MARK: - Summary Card
+// MARK: - Summary Card with extra stats
 struct SummaryCard: View {
-    let totalMissions: Int
+    let sessions: [Session]
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let today = Calendar.current.startOfDay(for: Date())
+        let todayCount = sessions.filter { Calendar.current.isDate($0.date, inSameDayAs: today) }.count
+        let weekCount = sessions.filter { Calendar.current.isDate($0.date, equalTo: Date(), toGranularity: .weekOfYear) }.count
+        let monthCount = sessions.filter { Calendar.current.isDate($0.date, equalTo: Date(), toGranularity: .month) }.count
+
+        return VStack(alignment: .leading, spacing: 10) {
             Text("Summary").font(.headline)
             HStack {
-                StatTile(title: "Total Sessions", value: totalMissions)
+                StatTile(title: "Total", value: sessions.count)
                 Spacer()
+                StatTile(title: "Today", value: todayCount)
+                Spacer()
+                StatTile(title: "Week", value: weekCount)
+                Spacer()
+                StatTile(title: "Month", value: monthCount)
             }
         }
         .padding()
@@ -191,7 +259,7 @@ struct HistoryList: View {
             Text("History").font(.headline).padding(.horizontal)
 
             if sessions.isEmpty {
-                Text("No sessions yet. Tap “+”.")
+                Text("No sessions yet. Tap “+” to add.")
                     .font(.subheadline).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal)
@@ -206,7 +274,6 @@ struct HistoryList: View {
                                 }
                             }
                             Spacer(minLength: 8)
-                            // Icon-only actions
                             HStack(spacing: 12) {
                                 Button { onEdit(s) } label: {
                                     Image(systemName: "pencil")
@@ -238,7 +305,7 @@ struct HistoryList: View {
     }
 }
 
-// MARK: - Edit Sheet
+// MARK: - Edit Session Sheet
 struct EditSessionSheet: View {
     @Environment(\.dismiss) private var dismiss
     var session: Session
@@ -267,6 +334,29 @@ struct EditSessionSheet: View {
                         onSave(Session(id: session.id, date: date, note: note))
                         dismiss()
                     }
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Edit Title Sheet
+struct EditTitleSheet: View {
+    @Binding var title: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("App Title", text: $title)
+            }
+            .navigationTitle("Edit Title")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
                 }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
