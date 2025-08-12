@@ -22,58 +22,68 @@ fileprivate struct RemovedItem: Equatable {
     let index: Int
 }
 fileprivate enum UndoOp: Equatable {
-    case added(Session)                      // undo = remove that session
-    case deleted([RemovedItem])              // undo = reinsert items at original indices
-    case edited(before: Session, index: Int) // undo = restore old session at index
+    case added(Session)
+    case deleted([RemovedItem])
+    case edited(before: Session, index: Int)
 }
 
 // MARK: - ContentView
 struct ContentView: View {
     @AppStorage("appTitle") private var appTitle: String = "Sessions Tracker"
+    @AppStorage("appAppearance") private var appAppearance: String = "dark" // "light" or "dark"
+
     @State private var sessions: [Session] = []
     @State private var note: String = ""
     @State private var editing: Session? = nil
     @State private var showResetAlert = false
-    @State private var showTitleEdit = false
-
-    // Undo stack
+    @State private var showSettings = false
     @State private var undoStack: [UndoOp] = []
+
+    // Map stored string -> ColorScheme
+    private var selectedColorScheme: ColorScheme {
+        appAppearance == "light" ? .light : .dark
+    }
+
+    // Dynamic colors (adapt automatically to light/dark)
+    private var appBG: Color { Color(.systemBackground) }
+    private var cardBG: Color { Color(.secondarySystemBackground) }
+    private var listRowBG: Color { Color(.secondarySystemBackground) }
 
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(white: 0.08)
-                    .ignoresSafeArea()
+                appBG.ignoresSafeArea() // adaptive background
                     .onTapGesture { hideKeyboard() }
 
                 VStack(spacing: 14) {
-                    // Title row with Reset next to title (swapped positions)
+                    // Title row with Reset next to title
                     HStack(spacing: 10) {
                         Text(appTitle)
                             .font(.largeTitle).bold()
+                            .foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.top, 8)
 
-                        // Reset now sits by the title (left side area)
                         Button {
                             showResetAlert = true
                         } label: {
                             Image(systemName: "arrow.counterclockwise")
-                                .foregroundColor(.red)
+                                .foregroundStyle(.red)
                         }
                         .accessibilityLabel("Reset All History")
                     }
                     .padding(.horizontal)
 
                     // Summary
-                    SummaryCard(sessions: sessions)
+                    SummaryCard(sessions: sessions, cardBG: cardBG)
 
                     // History
                     HistoryList(
                         sessions: $sessions,
                         onDeleteOffsets: deleteSessionOffsets,
                         onEdit: { s in editing = s },
-                        onDeleteSingle: deleteSingle
+                        onDeleteSingle: deleteSingle,
+                        rowBG: listRowBG
                     )
 
                     Spacer()
@@ -81,7 +91,11 @@ struct ContentView: View {
                     // Notes (optional) above the buttons
                     TextField("Notes (optional)", text: $note, axis: .vertical)
                         .padding(12)
-                        .background(RoundedRectangle(cornerRadius: 14).fill(Color(white: 0.15)))
+                        .background(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(cardBG) // adaptive field bg
+                        )
+                        .foregroundStyle(.primary)
                         .padding(.horizontal)
                         .submitLabel(.done)
                         .onSubmit {
@@ -91,13 +105,12 @@ struct ContentView: View {
                 }
             }
             .navigationBarHidden(false)
-            // Settings icon in the top-right (was pencil; now gearshape) to edit title
+            // Settings icon (gear) top-right
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showTitleEdit = true
-                    } label: {
+                    Button { showSettings = true } label: {
                         Image(systemName: "gearshape")
+                            .foregroundStyle(.primary)
                     }
                     .accessibilityLabel("Settings")
                 }
@@ -112,8 +125,8 @@ struct ContentView: View {
             } message: {
                 Text("This will permanently delete all logged sessions.")
             }
-            .sheet(isPresented: $showTitleEdit) {
-                EditTitleSheet(title: $appTitle)
+            .sheet(isPresented: $showSettings) {
+                SettingsSheet(title: $appTitle, appearance: $appAppearance)
             }
             .onAppear(perform: loadSessions)
 
@@ -125,7 +138,7 @@ struct ContentView: View {
                         Button(action: { undoLastAction() }) {
                             Image(systemName: "arrow.uturn.backward")
                                 .font(.title2)
-                                .foregroundColor(.white)
+                                .foregroundStyle(.primary) // adaptive icon color
                         }
                         .padding(.leading, 20)
                         .accessibilityLabel("Undo")
@@ -137,7 +150,8 @@ struct ContentView: View {
                         addSession()
                         hideKeyboard()
                     }) {
-                        Text("+")
+                        // keep white glyph for contrast on red
+                        Image(systemName: "plus")
                             .font(.title).bold()
                             .foregroundStyle(.white)
                             .frame(width: 80, height: 80)
@@ -160,7 +174,7 @@ struct ContentView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(selectedColorScheme) // applies user choice
         .tint(.red)
     }
 
@@ -231,16 +245,18 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Summary Card with extra stats
+// MARK: - Summary Card (adaptive colors)
 struct SummaryCard: View {
     let sessions: [Session]
+    var cardBG: Color
+
     var body: some View {
         let todayCount = sessions.filter { Calendar.current.isDate($0.date, inSameDayAs: Date()) }.count
         let weekCount  = sessions.filter { Calendar.current.isDate($0.date, equalTo: Date(), toGranularity: .weekOfYear) }.count
         let monthCount = sessions.filter { Calendar.current.isDate($0.date, equalTo: Date(), toGranularity: .month) }.count
 
         return VStack(alignment: .leading, spacing: 10) {
-            Text("Summary").font(.headline)
+            Text("Summary").font(.headline).foregroundStyle(.primary)
             HStack {
                 StatTile(title: "Total", value: sessions.count)
                 Spacer()
@@ -253,7 +269,7 @@ struct SummaryCard: View {
         }
         .padding()
         .frame(maxWidth: .infinity)
-        .background(Color(white: 0.12))
+        .background(cardBG) // adaptive
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .padding(.horizontal)
     }
@@ -264,26 +280,28 @@ struct StatTile: View {
     let value: Int
     var body: some View {
         VStack(alignment: .leading) {
-            Text(title).font(.caption).opacity(0.85)
-            Text("\(value)").font(.title2).bold()
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text("\(value)").font(.title2).bold().foregroundStyle(.primary)
         }
     }
 }
 
-// MARK: - History List
+// MARK: - History List (adaptive row background)
 struct HistoryList: View {
     @Binding var sessions: [Session]
     var onDeleteOffsets: (IndexSet) -> Void
     var onEdit: (Session) -> Void
     var onDeleteSingle: (Session) -> Void
+    var rowBG: Color
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("History").font(.headline).padding(.horizontal)
+            Text("History").font(.headline).padding(.horizontal).foregroundStyle(.primary)
 
             if sessions.isEmpty {
                 Text("No sessions yet. Tap “+” to add.")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal)
             } else {
@@ -291,7 +309,9 @@ struct HistoryList: View {
                     ForEach(sessions) { s in
                         HStack(alignment: .center, spacing: 12) {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(s.date.formatted(date: .abbreviated, time: .shortened)).bold()
+                                Text(s.date.formatted(date: .abbreviated, time: .shortened))
+                                    .bold()
+                                    .foregroundStyle(.primary)
                                 if !s.note.isEmpty {
                                     Text(s.note).foregroundStyle(.secondary)
                                 }
@@ -300,7 +320,6 @@ struct HistoryList: View {
                             HStack(spacing: 12) {
                                 Button { onEdit(s) } label: {
                                     Image(systemName: "pencil")
-                                        .foregroundColor(.blue)
                                 }
                                 .buttonStyle(.bordered)
 
@@ -310,7 +329,7 @@ struct HistoryList: View {
                                 .buttonStyle(.bordered)
                             }
                         }
-                        .listRowBackground(Color(white: 0.12))
+                        .listRowBackground(rowBG) // adaptive
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button { onEdit(s) } label: { Image(systemName: "pencil") }.tint(.blue)
                             Button(role: .destructive) { onDeleteSingle(s) } label: { Image(systemName: "trash") }
@@ -320,9 +339,9 @@ struct HistoryList: View {
                     .onDelete(perform: onDeleteOffsets)
                 }
                 .listStyle(.plain)
-                .scrollContentBackground(.hidden)
+                .scrollContentBackground(.hidden) // use our own bg, not default
+                .background(.clear)
                 .frame(maxHeight: 360)
-                .background(Color.clear)
             }
         }
     }
@@ -367,24 +386,31 @@ struct EditSessionSheet: View {
     }
 }
 
-// MARK: - Edit Title Sheet
-struct EditTitleSheet: View {
+// MARK: - Settings Sheet (Title + Appearance)
+struct SettingsSheet: View {
     @Binding var title: String
+    @Binding var appearance: String // "light" or "dark"
+
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             Form {
-                TextField("App Title", text: $title)
+                Section("Title") {
+                    TextField("App Title", text: $title)
+                }
+                Section("Appearance") {
+                    Picker("Mode", selection: $appearance) {
+                        Text("Light").tag("light")
+                        Text("Dark").tag("dark")
+                    }
+                    .pickerStyle(.segmented)
+                }
             }
-            .navigationTitle("Edit Title")
+            .navigationTitle("Settings")
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
         }
     }
@@ -393,6 +419,5 @@ struct EditTitleSheet: View {
 // MARK: - Preview
 #Preview {
     ContentView()
-        .preferredColorScheme(.dark)
 }
-//v1.2
+//V1.2
