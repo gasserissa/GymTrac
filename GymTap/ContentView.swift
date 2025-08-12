@@ -191,7 +191,7 @@ struct HistoryList: View {
             Text("History").font(.headline).padding(.horizontal)
 
             if sessions.isEmpty {
-                Text("No sessions yet. Tap “Log Session”.")
+                Text("No sessions yet. Tap “+”.")
                     .font(.subheadline).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal)
