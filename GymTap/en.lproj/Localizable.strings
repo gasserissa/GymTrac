@@ -5,3 +5,41 @@
   Created by gasser issa on 13/08/2025.
   
 */
+"summary" = "Summary";
+"total" = "Total";
+"today" = "Today";
+"week" = "Week";
+"month" = "Month";
+"history" = "History";
+"empty_history_hint" = "No sessions yet. Tap “+” to add.";
+"notes_placeholder" = "Notes (optional)";
+
+"settings" = "Settings";
+"general" = "General";
+"appearance" = "Appearance";
+"language" = "Language";
+"mode" = "Mode";
+"light" = "Light";
+"dark" = "Dark";
+"app_title" = "App Title";
+"done" = "Done";
+"save" = "Save";
+"cancel" = "Cancel";
+
+"reset_all_history_title" = "Reset All History?";
+"reset_all_history_message" = "This will permanently delete all logged sessions.";
+"reset" = "Reset";
+
+"edit_session" = "Edit session";
+"date_time" = "Date & time";
+
+"undo_a11y" = "Undo";
+"log_session_a11y" = "Log Session";
+"reset_all_history_a11y" = "Reset All History";
+
+"end" = "End";
+"end_time" = "End Time";
+"clear_end_time" = "Clear End Time";
+
+"am_symbol" = "AM";
+"pm_symbol" = "PM";

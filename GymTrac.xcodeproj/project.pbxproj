@@ -27,11 +27,33 @@
 		A5DA52CF2E493A6200393A66 /* GymTrac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GymTrac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A5DA52DC2E493A6600393A66 /* GymTracTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GymTracTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A5DA52E62E493A6600393A66 /* GymTracUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GymTracUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A5DA53E92E4BEF0900393A66 /* GymTrac-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GymTrac-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A5DA53EF2E4C8C5F00393A66 /* Exceptions for "GymTap" folder in "GymTracTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"/Localized: Localizable.strings",
+			);
+			target = A5DA52DB2E493A6600393A66 /* GymTracTests */;
+		};
+		A5DA53F02E4C8C5F00393A66 /* Exceptions for "GymTap" folder in "GymTracUITests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"/Localized: Localizable.strings",
+			);
+			target = A5DA52E52E493A6600393A66 /* GymTracUITests */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A5DA52D12E493A6200393A66 /* GymTap */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A5DA53EF2E4C8C5F00393A66 /* Exceptions for "GymTap" folder in "GymTracTests" target */,
+				A5DA53F02E4C8C5F00393A66 /* Exceptions for "GymTap" folder in "GymTracUITests" target */,
+			);
 			path = GymTap;
 			sourceTree = "<group>";
 		};
@@ -75,6 +97,7 @@
 		A5DA52C62E493A6200393A66 = {
 			isa = PBXGroup;
 			children = (
+				A5DA53E92E4BEF0900393A66 /* GymTrac-Info.plist */,
 				A5DA52D12E493A6200393A66 /* GymTap */,
 				A5DA52DF2E493A6600393A66 /* GymTapTests */,
 				A5DA52E92E493A6600393A66 /* GymTapUITests */,
@@ -192,6 +215,7 @@
 			knownRegions = (
 				en,
 				Base,
+				ar,
 			);
 			mainGroup = A5DA52C62E493A6200393A66;
 			minimizedProjectReferenceProxies = 1;
@@ -274,6 +298,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -338,6 +363,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -400,6 +426,10 @@
 				DEVELOPMENT_TEAM = 8V89LMP652;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "GymTrac-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "";
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -427,6 +457,10 @@
 				DEVELOPMENT_TEAM = 8V89LMP652;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "GymTrac-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "";
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

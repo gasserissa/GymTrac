@@ -9,11 +9,46 @@ extension View {
     }
 }
 
+/// Localized string in a specific locale (uses your in-app language)
+func L10N(_ key: String, _ locale: Locale) -> String {
+    if let path = Bundle.main.path(forResource: locale.identifier, ofType: "lproj"),
+       let bundle = Bundle(path: path) {
+        return NSLocalizedString(key, tableName: nil, bundle: bundle, value: key, comment: "")
+    }
+    return NSLocalizedString(key, comment: "")
+}
+
+/// Time only, honoring AM/PM overrides from Localizable.strings (keys: "am_symbol", "pm_symbol")
+private func localizedTime(_ date: Date, locale: Locale) -> String {
+    let df = DateFormatter()
+    df.locale = locale
+    df.dateStyle = .none
+    df.timeStyle = .short
+    let am = L10N("am_symbol", locale)
+    let pm = L10N("pm_symbol", locale)
+    if am != "am_symbol" { df.amSymbol = am }
+    if pm != "pm_symbol" { df.pmSymbol = pm }
+    return df.string(from: date)
+}
+
+/// Build ET text as a plain String (keeps SwiftUI view-builder happy)
+private func buildETText(start: Date, end: Date, locale: Locale) -> String {
+    let sameDay = Calendar.current.isDate(start, inSameDayAs: end)
+    if sameDay {
+        return "ET: " + localizedTime(end, locale: locale)
+    } else {
+        let datePart = end.formatted(date: .abbreviated, time: .omitted)
+        let timePart = localizedTime(end, locale: locale)
+        return "ET: " + datePart + ", " + timePart
+    }
+}
+
 // MARK: - Model
 struct Session: Identifiable, Codable, Equatable {
     var id = UUID()
-    var date: Date
+    var date: Date                  // start time
     var note: String
+    var endDate: Date? = nil        // optional end time
 }
 
 // MARK: - Undo stack
@@ -30,7 +65,8 @@ fileprivate enum UndoOp: Equatable {
 // MARK: - ContentView
 struct ContentView: View {
     @AppStorage("appTitle") private var appTitle: String = "Sessions Tracker"
-    @AppStorage("appAppearance") private var appAppearance: String = "dark" // "light" or "dark"
+    @AppStorage("appAppearance") private var appAppearance: String = "dark"   // "light"|"dark"
+    @AppStorage("appLanguage")  private var appLanguage: String  = "en"       // "en"|"ar"
 
     @State private var sessions: [Session] = []
     @State private var note: String = ""
@@ -39,12 +75,10 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var undoStack: [UndoOp] = []
 
-    // Map stored string -> ColorScheme
-    private var selectedColorScheme: ColorScheme {
-        appAppearance == "light" ? .light : .dark
-    }
+    private var selectedColorScheme: ColorScheme { appAppearance == "light" ? .light : .dark }
+    private var selectedLocale: Locale { Locale(identifier: appLanguage) }
 
-    // Dynamic colors (adapt automatically to light/dark)
+    // Adaptive colors
     private var appBG: Color { Color(.systemBackground) }
     private var cardBG: Color { Color(.secondarySystemBackground) }
     private var listRowBG: Color { Color(.secondarySystemBackground) }
@@ -52,11 +86,11 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                appBG.ignoresSafeArea() // adaptive background
+                appBG.ignoresSafeArea()
                     .onTapGesture { hideKeyboard() }
 
                 VStack(spacing: 14) {
-                    // Title row with Reset next to title
+                    // Title + Reset
                     HStack(spacing: 10) {
                         Text(appTitle)
                             .font(.largeTitle).bold()
@@ -64,13 +98,11 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.top, 8)
 
-                        Button {
-                            showResetAlert = true
-                        } label: {
+                        Button { showResetAlert = true } label: {
                             Image(systemName: "arrow.counterclockwise")
                                 .foregroundStyle(.red)
                         }
-                        .accessibilityLabel("Reset All History")
+                        .accessibilityLabel(Text("reset_all_history_a11y"))
                     }
                     .padding(.horizontal)
 
@@ -83,18 +115,17 @@ struct ContentView: View {
                         onDeleteOffsets: deleteSessionOffsets,
                         onEdit: { s in editing = s },
                         onDeleteSingle: deleteSingle,
-                        rowBG: listRowBG
+                        onEnd: endSession,
+                        rowBG: listRowBG,
+                        locale: selectedLocale
                     )
 
                     Spacer()
 
-                    // Notes (optional) above the buttons
-                    TextField("Notes (optional)", text: $note, axis: .vertical)
+                    // Notes (optional)
+                    TextField(LocalizedStringKey("notes_placeholder"), text: $note, axis: .vertical)
                         .padding(12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14)
-                                .fill(cardBG) // adaptive field bg
-                        )
+                        .background(RoundedRectangle(cornerRadius: 14).fill(cardBG))
                         .foregroundStyle(.primary)
                         .padding(.horizontal)
                         .submitLabel(.done)
@@ -105,32 +136,31 @@ struct ContentView: View {
                 }
             }
             .navigationBarHidden(false)
-            // Settings icon (gear) top-right
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showSettings = true } label: {
                         Image(systemName: "gearshape")
                             .foregroundStyle(.primary)
                     }
-                    .accessibilityLabel("Settings")
+                    .accessibilityLabel(Text("settings"))
                 }
             }
-            .alert("Reset All History?", isPresented: $showResetAlert) {
-                Button("Cancel", role: .cancel) { }
-                Button("Reset", role: .destructive) {
+            .alert(Text("reset_all_history_title"), isPresented: $showResetAlert) {
+                Button(LocalizedStringKey("cancel"), role: .cancel) { }
+                Button(LocalizedStringKey("reset"), role: .destructive) {
                     sessions.removeAll()
                     undoStack.removeAll()
                     saveSessions()
                 }
             } message: {
-                Text("This will permanently delete all logged sessions.")
+                Text("reset_all_history_message")
             }
             .sheet(isPresented: $showSettings) {
-                SettingsSheet(title: $appTitle, appearance: $appAppearance)
+                SettingsSheet(title: $appTitle, appearance: $appAppearance, language: $appLanguage)
             }
             .onAppear(perform: loadSessions)
 
-            // Bottom controls: Undo bottom-left (icon only), + centered
+            // Bottom controls
             .safeAreaInset(edge: .bottom) {
                 ZStack {
                     // Undo bottom-left
@@ -138,10 +168,10 @@ struct ContentView: View {
                         Button(action: { undoLastAction() }) {
                             Image(systemName: "arrow.uturn.backward")
                                 .font(.title2)
-                                .foregroundStyle(.primary) // adaptive icon color
+                                .foregroundStyle(.primary)
                         }
                         .padding(.leading, 20)
-                        .accessibilityLabel("Undo")
+                        .accessibilityLabel(Text("undo_a11y"))
                         Spacer()
                     }
 
@@ -150,7 +180,6 @@ struct ContentView: View {
                         addSession()
                         hideKeyboard()
                     }) {
-                        // keep white glyph for contrast on red
                         Image(systemName: "plus")
                             .font(.title).bold()
                             .foregroundStyle(.white)
@@ -158,12 +187,12 @@ struct ContentView: View {
                             .background(Circle().fill(Color.red))
                             .shadow(radius: 4)
                     }
-                    .accessibilityLabel("Log Session")
+                    .accessibilityLabel(Text("log_session_a11y"))
                 }
                 .padding(.bottom, 8)
             }
 
-            // Edit sheet (returns updated + original for undo)
+            // Edit sheet (supports end time)
             .sheet(item: $editing) { s in
                 EditSessionSheet(session: s) { updated, original in
                     if let idx = sessions.firstIndex(where: { $0.id == original.id }) {
@@ -174,7 +203,8 @@ struct ContentView: View {
                 }
             }
         }
-        .preferredColorScheme(selectedColorScheme) // applies user choice
+        .preferredColorScheme(selectedColorScheme)
+        .environment(\.locale, selectedLocale)
         .tint(.red)
     }
 
@@ -186,6 +216,17 @@ struct ContentView: View {
         note = ""
         saveSessions()
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    func endSession(_ session: Session) {
+        guard let idx = sessions.firstIndex(where: { $0.id == session.id }) else { return }
+        let before = sessions[idx]
+        var after = before
+        after.endDate = Date()
+        undoStack.append(.edited(before: before, index: idx))
+        sessions[idx] = after
+        saveSessions()
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
     }
 
     func deleteSessionOffsets(_ offsets: IndexSet) {
@@ -245,7 +286,19 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Summary Card (adaptive colors)
+// MARK: - Duration formatting
+private func formattedDuration(from start: Date, to end: Date, locale: Locale) -> String? {
+    guard end >= start else { return nil }
+    let f = DateComponentsFormatter()
+    f.allowedUnits = [.hour, .minute]
+    f.unitsStyle = .abbreviated
+    f.maximumUnitCount = 2
+    f.calendar = Calendar(identifier: .gregorian)
+    f.calendar?.locale = locale
+    return f.string(from: start, to: end)
+}
+
+// MARK: - Summary Card
 struct SummaryCard: View {
     let sessions: [Session]
     var cardBG: Color
@@ -256,27 +309,27 @@ struct SummaryCard: View {
         let monthCount = sessions.filter { Calendar.current.isDate($0.date, equalTo: Date(), toGranularity: .month) }.count
 
         return VStack(alignment: .leading, spacing: 10) {
-            Text("Summary").font(.headline).foregroundStyle(.primary)
+            Text("summary").font(.headline).foregroundStyle(.primary)
             HStack {
-                StatTile(title: "Total", value: sessions.count)
+                StatTile(title: "total", value: sessions.count)
                 Spacer()
-                StatTile(title: "Today", value: todayCount)
+                StatTile(title: "today", value: todayCount)
                 Spacer()
-                StatTile(title: "Week", value: weekCount)
+                StatTile(title: "week", value: weekCount)
                 Spacer()
-                StatTile(title: "Month", value: monthCount)
+                StatTile(title: "month", value: monthCount)
             }
         }
         .padding()
         .frame(maxWidth: .infinity)
-        .background(cardBG) // adaptive
+        .background(cardBG)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .padding(.horizontal)
     }
 }
 
 struct StatTile: View {
-    let title: String
+    let title: LocalizedStringKey
     let value: Int
     var body: some View {
         VStack(alignment: .leading) {
@@ -286,20 +339,22 @@ struct StatTile: View {
     }
 }
 
-// MARK: - History List (adaptive row background)
+// MARK: - History List
 struct HistoryList: View {
     @Binding var sessions: [Session]
     var onDeleteOffsets: (IndexSet) -> Void
     var onEdit: (Session) -> Void
     var onDeleteSingle: (Session) -> Void
+    var onEnd: (Session) -> Void
     var rowBG: Color
+    var locale: Locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("History").font(.headline).padding(.horizontal).foregroundStyle(.primary)
+            Text("history").font(.headline).padding(.horizontal).foregroundStyle(.primary)
 
             if sessions.isEmpty {
-                Text("No sessions yet. Tap “+” to add.")
+                Text("empty_history_hint")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -307,29 +362,86 @@ struct HistoryList: View {
             } else {
                 List {
                     ForEach(sessions) { s in
-                        HStack(alignment: .center, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(s.date.formatted(date: .abbreviated, time: .shortened))
-                                    .bold()
-                                    .foregroundStyle(.primary)
+                        HStack(alignment: .top, spacing: 12) {
+                            // LEFT: content
+                            VStack(alignment: .leading, spacing: 6) {
+
+                                // Line 1: date + duration (if ET exists)
+                                HStack(spacing: 8) {
+                                    Text(s.date.formatted(date: .abbreviated, time: .omitted))
+                                        .bold()
+                                        .foregroundStyle(.primary)
+
+                                    if let end = s.endDate,
+                                       let d = formattedDuration(from: s.date, to: end, locale: locale) {
+                                        Text("(\(d))")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+
+                                // Line 2: ST (and End button if no ET)
+                                HStack {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "clock")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text("ST: \(localizedTime(s.date, locale: locale))")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.8)
+                                    }
+                                    Spacer()
+                                    if s.endDate == nil {
+                                        Button { onEnd(s) } label: {
+                                            Text(LocalizedStringKey("end"))
+                                                .font(.subheadline).bold()
+                                        }
+                                        .buttonStyle(.borderedProminent)
+                                        .tint(.red)
+                                        .controlSize(.mini)
+                                    }
+                                }
+
+                                // Line 3: ET (single line)
+                                if let end = s.endDate {
+                                    let etText = buildETText(start: s.date, end: end, locale: locale)
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "clock.arrow.circlepath")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text(etText)
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.8)
+                                            .padding(.trailing, 2)
+                                    }
+                                    .padding(.top, 2)
+                                }
+
+                                // Line 4: Note
                                 if !s.note.isEmpty {
-                                    Text(s.note).foregroundStyle(.secondary)
+                                    Text(s.note)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
-                            Spacer(minLength: 8)
-                            HStack(spacing: 12) {
-                                Button { onEdit(s) } label: {
-                                    Image(systemName: "pencil")
-                                }
-                                .buttonStyle(.bordered)
 
-                                Button(role: .destructive) { onDeleteSingle(s) } label: {
-                                    Image(systemName: "trash")
+                            Spacer(minLength: 8)
+
+                            // RIGHT: actions pinned to bottom
+                            VStack {
+                                Spacer(minLength: 0)
+                                HStack(spacing: 12) {
+                                    Button { onEdit(s) } label: { Image(systemName: "pencil") }
+                                        .buttonStyle(.bordered)
+                                    Button(role: .destructive) { onDeleteSingle(s) } label: { Image(systemName: "trash") }
+                                        .buttonStyle(.bordered)
                                 }
-                                .buttonStyle(.bordered)
                             }
                         }
-                        .listRowBackground(rowBG) // adaptive
+                        .listRowBackground(rowBG)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button { onEdit(s) } label: { Image(systemName: "pencil") }.tint(.blue)
                             Button(role: .destructive) { onDeleteSingle(s) } label: { Image(systemName: "trash") }
@@ -339,7 +451,7 @@ struct HistoryList: View {
                     .onDelete(perform: onDeleteOffsets)
                 }
                 .listStyle(.plain)
-                .scrollContentBackground(.hidden) // use our own bg, not default
+                .scrollContentBackground(.hidden)
                 .background(.clear)
                 .frame(maxHeight: 360)
             }
@@ -347,7 +459,7 @@ struct HistoryList: View {
     }
 }
 
-// MARK: - Edit Session Sheet (returns updated + original for undo)
+// MARK: - Edit Session Sheet
 struct EditSessionSheet: View {
     @Environment(\.dismiss) private var dismiss
     var session: Session
@@ -355,62 +467,88 @@ struct EditSessionSheet: View {
 
     @State private var date: Date
     @State private var note: String
+    @State private var hasEndTime: Bool
+    @State private var endDate: Date
 
     init(session: Session, onSave: @escaping (Session, Session) -> Void) {
         self.session = session
         self.onSave = onSave
         _date = State(initialValue: session.date)
         _note = State(initialValue: session.note)
+        _hasEndTime = State(initialValue: session.endDate != nil)
+        _endDate = State(initialValue: session.endDate ?? session.date)
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                DatePicker("Date & time", selection: $date)
-                TextField("Notes (optional)", text: $note, axis: .vertical)
+                Section {
+                    DatePicker(LocalizedStringKey("date_time"), selection: $date)
+                    TextField(LocalizedStringKey("notes_placeholder"), text: $note, axis: .vertical)
+                }
+                Section {
+                    Toggle(LocalizedStringKey("end_time"), isOn: $hasEndTime)
+                    if hasEndTime {
+                        DatePicker(LocalizedStringKey("end_time"), selection: $endDate)
+                    } else if session.endDate != nil {
+                        Button(role: .destructive) {
+                            hasEndTime = false
+                        } label: {
+                            Text(LocalizedStringKey("clear_end_time"))
+                        }
+                    }
+                }
             }
-            .navigationTitle("Edit session")
+            .navigationTitle(Text("edit_session"))
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        let updated = Session(id: session.id, date: date, note: note)
+                    Button(LocalizedStringKey("save")) {
+                        var updated = Session(id: session.id, date: date, note: note)
+                        updated.endDate = hasEndTime ? endDate : nil
                         onSave(updated, session)
                         dismiss()
                     }
                 }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(LocalizedStringKey("cancel")) { dismiss() }
                 }
             }
         }
     }
 }
 
-// MARK: - Settings Sheet (Title + Appearance)
+// MARK: - Settings Sheet (Title + Appearance + Language)
 struct SettingsSheet: View {
     @Binding var title: String
-    @Binding var appearance: String // "light" or "dark"
-
+    @Binding var appearance: String // "light"|"dark"
+    @Binding var language: String   // "en"|"ar"
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Title") {
-                    TextField("App Title", text: $title)
+                Section(LocalizedStringKey("Title")) {
+                    TextField(LocalizedStringKey("app_title"), text: $title)
                 }
-                Section("Appearance") {
-                    Picker("Mode", selection: $appearance) {
-                        Text("Light").tag("light")
-                        Text("Dark").tag("dark")
+                Section(LocalizedStringKey("appearance")) {
+                    Picker(LocalizedStringKey("mode"), selection: $appearance) {
+                        Text("light").tag("light")
+                        Text("dark").tag("dark")
+                    }
+                    .pickerStyle(.segmented)
+                }
+                Section(LocalizedStringKey("language")) {
+                    Picker(LocalizedStringKey("language"), selection: $language) {
+                        Text("English").tag("en")
+                        Text("العربية").tag("ar")
                     }
                     .pickerStyle(.segmented)
                 }
             }
-            .navigationTitle("Settings")
+            .navigationTitle(Text("settings"))
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button(LocalizedStringKey("done")) { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(LocalizedStringKey("cancel")) { dismiss() } }
             }
         }
     }
@@ -420,4 +558,4 @@ struct SettingsSheet: View {
 #Preview {
     ContentView()
 }
-//V1.2
+
